@@ -1,0 +1,434 @@
+---
+title: "ListaFinal"
+author: "Patricia Ramos"
+date: "2023-02-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+## Carregando os pacotes
+
+```{r}
+#install.packages('srvyr')
+library(tidyverse) # manipulação de dados
+library(srvyr) #trabalha com amostras complexas - lembre-se de instalar o pacote
+library(readr) #carregar dados no R
+library(readxl) #carregar dados do excel
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+```
+
+```{r, echo=FALSE}
+pnad_covid <- read_csv("C:/Users/patri/Desktop/RStudio/PNAD_COVID_112020.csv")
+```
+
+```{r}
+summary(pnad_covid)
+```
+
+```{r}
+head(pnad_covid)
+```
+
+```{r}
+pnad_covid = read_csv("PNAD_COVID_112020.csv", col_types = cols(.default = "d")) %>% 
+   as_survey_design(ids = UPA, strata = Estrato, weights = V1032, nest = TRUE)
+```
+
+```{r}
+pnad_escola = pnad_covid %>% mutate(one = 1,
+                      escola = ifelse(A006A == 1, "Pública", "Privada"),
+                      aula_presencial = factor(case_when(
+                               A006B == 1 ~ "Sim, normalmente",
+                               A006B == 2 ~ "Sim, mas apenas parcialmente", 
+                               A006B == 3 ~ "Não, e meu normalmente é presencial/semipresencial", 
+                               A006B == 4 ~ "Não, meu curso é online"), 
+                               levels = c('Sim, normalmente', 'Sim, mas apenas parcialmente',
+                                        'Não, e meu normalmente é presencial/semipresencial',
+                                        'Não, meu curso é online')),
+                      homework = factor(case_when(
+                               A007 == 1 ~ "Sim, e realizou pelo menos parte delas",
+                               A007 == 2 ~ "Sim, mas não realizou (por qualquer motivo)", 
+                               A007 == 3 ~ "Não", 
+                               A007 == 4 ~ "Não, porque estava de férias"),
+                               levels = c('Sim, e realizou pelo menos parte delas',
+                                          'Sim, mas não realizou (por qualquer motivo)',
+                                          'Não', 'Não, porque estava de férias')),
+                      razao_naohomework = factor(case_when(
+                               A007A == 1 ~ "Equipamento",
+                               A007A == 2 ~ "Internet", 
+                               A007A == 3 ~ "Saúde", 
+                               A007A == 4 ~ "Afazeres domésticos/família",
+                               A007A == 5 ~ "Concentração"),
+                               levels = c('Equipamento', 'Internet', 'Saúde', 'Afazeres domésticos/família', 'Concentração')))
+```
+
+```{r}
+pnad_escola %>%   
+          group_by(escola, aula_presencial) %>%
+          summarise(freq_escola = survey_prop()) %>% 
+          mutate(freq_escola = freq_escola * 100) %>% 
+          drop_na() %>% 
+ggplot(aes(x = escola, y = freq_escola, fill = escola)) +
+   geom_bar(stat = "identity") +
+   facet_wrap(~aula_presencial) +
+   labs(title = 'Distribuição de aulas presenciais por rede de ensino a partir da pergunta: "Você está tendo aulas presenciais?"', x = NULL, y = 'Frequenta escola (%)') +
+   theme_bw() +
+   theme(title = element_text(size = 14),
+        strip.text.x = element_text(size=12, face="bold"),
+        legend.text = element_text(size = 15),
+        axis.title.y = element_text(size = 12),
+        legend.position = 'none')
+```
+
+```{r}
+febre_teste_positivo = pnad_covid %>%
+  filter(B0011 %in% c(1:3)) %>% 
+  mutate(febre = case_when(
+             B0011 == 1 ~ "Sim",
+             B0011 == 2 ~ "Não",
+             B0011 == 3 ~ "Não sabe")) %>% 
+  group_by(febre) %>%
+  summarise(total_positivo_swab = survey_total(B009B == 1, na.rm = TRUE),
+            total_positivo_dedo = survey_total(B009D == 1, na.rm = TRUE),
+            total_positivo_braco = survey_total(B009F == 1, na.rm = TRUE),
+            total = survey_total(B008 == 1, na.rm = TRUE)) %>% 
+  mutate(febre_positivo_swab = 100 * total_positivo_swab/total,
+         febre_positivo_dedo = 100 * total_positivo_dedo/total,
+         febre_positivo_braco = 100 * total_positivo_braco/total)
+
+type.labels = c('Sangue através da veia do braço', 'Sangue através de furo no dedo',
+                'Cotonete na boca e/ou nariz (SWAB)')
+names(type.labels) = c('febre_positivo_braco', 'febre_positivo_dedo', 'febre_positivo_swab')
+
+febre_teste_positivo %>% 
+  select(febre, febre_positivo_swab, febre_positivo_dedo, febre_positivo_braco) %>% 
+  pivot_longer(
+    cols = !febre,
+    names_to = 'variavel',
+    values_to = 'metrica') %>% 
+ggplot(aes(x = febre, y = metrica, fill = febre)) +
+   geom_bar(stat = "identity") +
+   facet_wrap(~variavel, labeller = labeller(variavel = type.labels)) +
+   labs(title = 'Distribuição de pessoas que testaram positivo por sintoma de febre e tipo de teste',  y = '(%)', x = 'Na semana passada teve febre?') +
+   theme_bw() +
+   theme(title = element_text(size = 13),
+        strip.text.x = element_text(size = 12, face ="bold"),
+        legend.text = element_text(size = 12),
+        axis.title.x = element_text(size = 12, face = 'bold'),
+        legend.position = 'none')
+```
+
+```{r}
+tosse_teste_positivo = pnad_covid %>%
+  filter(B0012 %in% c(1:3)) %>% 
+  mutate(tosse = case_when(
+             B0012 == 1 ~ "Sim",
+             B0012 == 2 ~ "Não",
+             B0012 == 3 ~ "Não sabe")) %>% 
+  group_by(tosse) %>%
+  summarise(total_positivo_swab = survey_total(B009B == 1, na.rm = TRUE),
+            total_positivo_dedo = survey_total(B009D == 1, na.rm = TRUE),
+            total_positivo_braco = survey_total(B009F == 1, na.rm = TRUE),
+            total = survey_total(B008 == 1, na.rm = TRUE)) %>% 
+  mutate(tosse_positivo_swab = 100 * total_positivo_swab/total,
+         tosse_positivo_dedo = 100 * total_positivo_dedo/total,
+         tosse_positivo_braco = 100 * total_positivo_braco/total)
+
+names(type.labels) = c('tosse_positivo_braco', 'tosse_positivo_dedo', 'tosse_positivo_swab')
+
+tosse_teste_positivo %>% 
+  select(tosse, tosse_positivo_swab, tosse_positivo_dedo, tosse_positivo_braco) %>% 
+  pivot_longer(
+    cols = !tosse,
+    names_to = 'variavel',
+    values_to = 'metrica') %>% 
+ggplot(aes(x = tosse, y = metrica, fill = tosse)) +
+   geom_bar(stat = "identity") +
+   facet_wrap(~variavel, labeller = labeller(variavel = type.labels)) +
+   labs(title = 'Distribuição de pessoas que testaram positivo por sintoma de tosse e tipo de teste',  y = '(%)', x = 'Na semana passada teve tosse?') +
+   theme_bw() +
+   theme(title = element_text(size = 13),
+        strip.text.x = element_text(size = 12, face ="bold"),
+        legend.text = element_text(size = 12),
+        axis.title.x = element_text(size = 12, face = 'bold'),
+        legend.position = 'none')
+```
+
+```{r}
+garganta_teste_positivo = pnad_covid %>%
+  filter(B0013 %in% c(1:3)) %>% 
+  mutate(garganta = case_when(
+             B0013 == 1 ~ "Sim",
+             B0013 == 2 ~ "Não",
+             B0013 == 3 ~ "Não sabe")) %>% 
+  group_by(garganta) %>%
+  summarise(total_positivo_swab = survey_total(B009B == 1, na.rm = TRUE),
+            total_positivo_dedo = survey_total(B009D == 1, na.rm = TRUE),
+            total_positivo_braco = survey_total(B009F == 1, na.rm = TRUE),
+            total = survey_total(B008 == 1, na.rm = TRUE)) %>% 
+  mutate(garganta_positivo_swab = 100 * total_positivo_swab/total,
+         garganta_positivo_dedo = 100 * total_positivo_dedo/total,
+         garganta_positivo_braco = 100 * total_positivo_braco/total)
+
+names(type.labels) = c('garganta_positivo_braco', 'garganta_positivo_dedo', 'garganta_positivo_swab')
+
+garganta_teste_positivo %>% 
+  select(garganta, garganta_positivo_swab, garganta_positivo_dedo, garganta_positivo_braco) %>% 
+  pivot_longer(
+    cols = !garganta,
+    names_to = 'variavel',
+    values_to = 'metrica') %>% 
+ggplot(aes(x = garganta, y = metrica, fill = garganta)) +
+   geom_bar(stat = "identity") +
+   facet_wrap(~variavel, labeller = labeller(variavel = type.labels)) +
+   labs(title = 'Distribuição de pessoas que testaram positivo por sintoma de dor de garganta e tipo de teste',  y = '(%)', x = 'Na semana passada teve dor de garganta?') +
+   theme_bw() +
+   theme(title = element_text(size = 13),
+        strip.text.x = element_text(size = 12, face ="bold"),
+        legend.text = element_text(size = 12),
+        axis.title.x = element_text(size = 12, face = 'bold'),
+        legend.position = 'none')
+```
+
+```{r}
+respirar_teste_positivo = pnad_covid %>%
+  filter(B0014 %in% c(1:3)) %>% 
+  mutate(respirar = case_when(
+             B0014 == 1 ~ "Sim",
+             B0014 == 2 ~ "Não",
+             B0014 == 3 ~ "Não sabe")) %>% 
+  group_by(respirar) %>%
+  summarise(total_positivo_swab = survey_total(B009B == 1, na.rm = TRUE),
+            total_positivo_dedo = survey_total(B009D == 1, na.rm = TRUE),
+            total_positivo_braco = survey_total(B009F == 1, na.rm = TRUE),
+            total = survey_total(B008 == 1, na.rm = TRUE)) %>% 
+  mutate(respirar_positivo_swab = 100 * total_positivo_swab/total,
+         respirar_positivo_dedo = 100 * total_positivo_dedo/total,
+         respirar_positivo_braco = 100 * total_positivo_braco/total)
+
+names(type.labels) = c('respirar_positivo_braco', 'respirar_positivo_dedo', 'respirar_positivo_swab')
+
+respirar_teste_positivo %>% 
+  select(respirar, respirar_positivo_swab, respirar_positivo_dedo, respirar_positivo_braco) %>% 
+  pivot_longer(
+    cols = !respirar,
+    names_to = 'variavel',
+    values_to = 'metrica') %>% 
+ggplot(aes(x = respirar, y = metrica, fill = respirar)) +
+   geom_bar(stat = "identity") +
+   facet_wrap(~variavel, labeller = labeller(variavel = type.labels)) +
+   labs(title = 'Distribuição de pessoas que testaram positivo por sintoma de dificuldade para respirar e tipo de teste',  y = '(%)', x = 'Na semana passada teve dificuldade para respirar?') +
+   theme_bw() +
+   theme(title = element_text(size = 13),
+        strip.text.x = element_text(size = 12, face ="bold"),
+        legend.text = element_text(size = 12),
+        axis.title.x = element_text(size = 12, face = 'bold'),
+        legend.position = 'none')
+```
+
+```{r}
+resultados_por_teste = pnad_covid %>% 
+  filter(B009A == 1, B009B %in% c(1:3)) %>% 
+  mutate(resultado = case_when(
+             B009B == 1 ~ "Positivo",
+             B009B== 2 ~ "Negativo",
+             B009B == 3 ~ "Inconclusivo")) %>% 
+  group_by(resultado) %>% 
+  summarise(total_percent = survey_prop()) %>%
+  mutate(total_percent = 100 * total_percent) %>% 
+  add_column(exame = rep('swab', 3))
+
+resultados_por_teste = rbind(resultados_por_teste, pnad_covid %>% 
+  filter(B009C == 1, B009D %in% c(1:3)) %>% 
+  mutate(resultado = case_when(
+             B009D == 1 ~ "Positivo",
+             B009D == 2 ~ "Negativo",
+             B009D == 3 ~ "Inconclusivo")) %>% 
+  group_by(resultado) %>% 
+  summarise(total_percent = survey_prop()) %>%
+  mutate(total_percent = 100 * total_percent) %>% 
+  add_column(exame = rep('dedo', 3)))
+
+resultados_por_teste = rbind(resultados_por_teste, pnad_covid %>% 
+  filter(B009E == 1, B009F %in% c(1:3)) %>% 
+  mutate(resultado = case_when(
+             B009F == 1 ~ "Positivo",
+             B009F == 2 ~ "Negativo",
+             B009F == 3 ~ "Inconclusivo")) %>% 
+  group_by(resultado) %>% 
+  summarise(total_percent = survey_prop()) %>%
+  mutate(total_percent = 100 * total_percent) %>% 
+  add_column(exame = rep('braco', 3)))
+  
+names(type.labels) = c('braco', 'dedo', 'swab')
+  
+ggplot(resultados_por_teste, aes(x = '', y = total_percent, fill = resultado)) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(label = paste0(round(total_percent, 2), "%")), position = position_stack(vjust = 0.5), size = 4, color = 'grey31') + 
+    coord_polar("y") +
+    facet_wrap(~exame, labeller = labeller(exame = type.labels)) +
+    labs(title = 'Distribuição entre os resultados por tipo de exame', fill = 'Resultado', x = NULL, y = NULL) +
+    theme_bw() +
+    theme(title = element_text(size = 13),
+        legend.text = element_text(size = 12),
+        strip.text.x = element_text(size = 12, face ="bold"),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank())
+```
+
+```{r}
+pnad_regiao = pnad_covid %>% 
+      mutate(regiao = case_when(
+                         UF %in% c(11:17) ~ "Norte",
+                         UF %in% c(21:29) ~ "Nordeste",
+                         UF %in% c(31:35) ~ "Suldeste",
+                         UF %in% c(41:43) ~ "Sul",
+                         UF %in% c(50:53) ~ "Centro-Oeste")) %>% 
+      group_by(regiao) %>% 
+      summarise(teste_swab = survey_total(B009A == 1, na.rm = TRUE),
+                teste_dedo = survey_total(B009C == 1, na.rm = TRUE),
+                teste_braco = survey_total(B009E == 1, na.rm = TRUE))
+
+total_testagem = pnad_regiao %>% 
+      select(teste_swab, teste_dedo, teste_braco) %>% rowSums()
+
+pnad_regiao = pnad_regiao %>% 
+       mutate(total_testes = total_testagem,
+              swab_testes = 100 * teste_swab/total_testes,
+              dedo_testes = 100 * teste_dedo/total_testes,
+              braco_testes = 100 * teste_braco/total_testes)
+
+pnad_regiao %>% 
+      select(regiao, swab_testes, dedo_testes, braco_testes) %>% 
+      pivot_longer(
+          cols = !regiao,
+          names_to = 'exame',
+          values_to = 'metrica'
+        ) %>% 
+
+ggplot(aes(x = '', y = metrica, fill = exame)) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(label = paste0(round(metrica, 2), "%")), position = position_stack(vjust = 0.5), size = 5, color = 'grey31') + 
+    coord_polar("y") +
+    facet_wrap(~regiao, nrow = 2) +
+    labs(title = 'Distribuição entre os tipos de exames por região', fill = 'Tipo de Exame', x = NULL, y = NULL) +
+    scale_fill_discrete(labels = c('Sangue através da veia do braço', 'Sangue através de furo no dedo', 'Cotonete na boca e/ou\n nariz (SWAB)')) +
+    theme_bw() +
+    theme(title = element_text(size = 13),
+        legend.text = element_text(size = 12),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        strip.text.x = element_text(size = 12, face ="bold"))
+```
+
+```{r}
+pnad_salario = pnad_covid %>% 
+      mutate(salario = factor(case_when(
+            C01012 <= 1044 ~ "Menos de um salário mínimo",
+            C01012 %in% c(1045:2090) ~ "Entre 1 e 2",
+            C01012 %in% c(2091:3135) ~ "Entre 2 e 3",
+            C01012 %in% c(3136:4180) ~ "Entre 3 e 4",
+            C01012 %in% c(4181:5225) ~ "Entre 4 e 5",
+            C01012 >= 5226 ~ "Mais de 5"),
+              levels = c("Menos de um salário mínimo",
+                         "Entre 1 e 2",
+                         "Entre 2 e 3",
+                         "Entre 3 e 4",
+                         "Entre 4 e 5",
+                         "Mais de 5"))) %>% 
+      group_by(salario) %>% 
+      summarise(teste_swab = survey_total(B009A == 1, na.rm = TRUE),
+                teste_dedo = survey_total(B009C == 1, na.rm = TRUE),
+                teste_braco = survey_total(B009E == 1, na.rm = TRUE)) %>% 
+      drop_na()
+    
+total_testagem = pnad_salario %>% 
+      select(teste_swab, teste_dedo, teste_braco) %>% rowSums()
+
+pnad_salario = pnad_salario %>% 
+      mutate(total_testes = total_testagem,
+              swab_testes = 100 * teste_swab/total_testes,
+              dedo_testes = 100 * teste_dedo/total_testes,
+              braco_testes = 100 * teste_braco/total_testes)
+
+pnad_salario %>% 
+      select(salario, swab_testes, dedo_testes, braco_testes) %>% 
+      pivot_longer(
+          cols = !salario,
+          names_to = 'exame',
+          values_to = 'metrica'
+        ) %>% 
+
+ggplot(aes(x = '', y = metrica, fill = exame)) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(label = paste0(round(metrica, 2), "%")), position = position_stack(vjust = 0.5), size = 4.5, color = 'grey31') + 
+    coord_polar("y") +
+    facet_wrap(~salario, nrow = 2) +
+    labs(title = 'Distribuição entre os tipos de exames por faixa salarial', fill = 'Tipo de Exame', x = NULL, y = NULL) +
+    scale_fill_discrete(labels = c('Sangue através da veia do braço', 'Sangue através de furo no dedo', 'Cotonete na boca e/ou\n nariz (SWAB)')) +
+    theme_bw() +
+    theme(title = element_text(size = 13),
+        legend.text = element_text(size = 12),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        strip.text.x = element_text(size = 12, face ="bold"))
+```
+
+```{r}
+pnad_idade = pnad_covid %>% 
+      mutate(idade = case_when(
+               A002 %in% 15:24 ~ "15-24",
+               A002 %in% 25:34 ~ "25-34", 
+               A002 %in% 35:49 ~ "35-49", 
+               A002 %in% 50:64 ~ "50-64", 
+               A002 > 64 ~ "65+")) %>% 
+      group_by(idade) %>% 
+      summarise(teste_swab = survey_total(B009A == 1, na.rm = TRUE),
+                teste_dedo = survey_total(B009C == 1, na.rm = TRUE),
+                teste_braco = survey_total(B009E == 1, na.rm = TRUE)) %>% 
+      drop_na()
+    
+total_testagem = pnad_idade %>% 
+      select(teste_swab, teste_dedo, teste_braco) %>% rowSums()
+
+pnad_idade = pnad_idade %>% 
+      mutate(total_testes = total_testagem,
+              swab_testes = 100 * teste_swab/total_testes,
+              dedo_testes = 100 * teste_dedo/total_testes,
+              braco_testes = 100 * teste_braco/total_testes)
+
+pnad_idade %>% 
+      select(idade, swab_testes, dedo_testes, braco_testes) %>% 
+      pivot_longer(
+          cols = !idade,
+          names_to = 'exame',
+          values_to = 'metrica'
+        ) %>% 
+
+ggplot(aes(x = '', y = metrica, fill = exame)) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(label = paste0(round(metrica, 2), "%")), position = position_stack(vjust = 0.5), size = 4.5, color = 'grey31') + 
+    coord_polar("y") +
+    facet_wrap(~idade, nrow = 2) +
+    labs(title = 'Distribuição entre os tipos de exames por faixa etária', fill = 'Tipo de Exame', x = NULL, y = NULL) +
+    scale_fill_discrete(labels = c('Sangue através da veia do braço', 'Sangue através de furo no dedo', 'Cotonete na boca e/ou\n nariz (SWAB)')) +
+    theme_bw() +
+    theme(title = element_text(size = 13),
+        legend.text = element_text(size = 12),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        strip.text.x = element_text(size = 12, face ="bold"))
+```
+
